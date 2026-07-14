@@ -1,0 +1,43 @@
+"""Build an auditable measured-RPM sidecar for Paderborn windows."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from shortcutfd.paderborn import load_paderborn_speed, measured_window_rpm  # noqa: E402
+from shortcutfd.windows import read_windows  # noqa: E402
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--windows", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+    by_path = defaultdict(list)
+    for window in read_windows(args.windows):
+        if window.dataset.lower() == "paderborn":
+            by_path[window.path].append(window)
+    rows = []
+    for index, (path, windows) in enumerate(sorted(by_path.items()), 1):
+        rpm, vibration_samples = load_paderborn_speed(path)
+        rows.extend(measured_window_rpm(window, rpm, vibration_samples) for window in windows)
+        if index % 50 == 0 or index == len(by_path):
+            print(f"processed {index}/{len(by_path)} records", flush=True)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    with args.out.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"wrote {len(rows)} measured-RPM rows to {args.out}")
+
+
+if __name__ == "__main__":
+    main()
